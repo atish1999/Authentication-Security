@@ -6,7 +6,7 @@ import express from "express";
 import bodyParser from "body-parser";
 import ejs from "ejs";
 import mongoose from "mongoose";
-import encrypt from "mongoose-encryption";
+import md5 from "md5";
 
 const app = express();
 
@@ -41,16 +41,8 @@ const userSchema = new mongoose.Schema({
 //*                    ENCRYPTING DATABASE
 */
 
-console.log(process.env.SECRET);
-
-userSchema.plugin(encrypt, {
-    secret: process.env.SECRET,
-    encryptedFields: ['password']
-});
-
 
 const User = mongoose.model('User', userSchema);
-
 
 
 app.route("/")
@@ -68,7 +60,7 @@ app.route("/register")
 
         const newUser = new User({
             email: req.body.username,
-            password: req.body.password
+            password: md5(req.body.password) // just for generating hash
         });
 
         // res.send(newUser);
@@ -102,7 +94,7 @@ app.route("/login")
                     console.log(err);
                 } else {
                     if (foundUser) {
-                        if (foundUser.password === req.body.password) {
+                        if (foundUser.password === md5(req.body.password)) {
                             res.render('secrets');
                         }
                     }
