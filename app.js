@@ -6,9 +6,9 @@ import express from "express";
 import bodyParser from "body-parser";
 import ejs from "ejs";
 import mongoose from "mongoose";
-import bcrypt from "bcrypt";
-
-const saltRounds = 10; //* for bcrypt hashing
+import session from "express-session";
+import passport from "passport";
+import passportLocalMongoose from 'passport-local-mongoose';
 
 const app = express();
 
@@ -20,10 +20,23 @@ app.use(bodyParser.urlencoded({
 
 app.use(express.static('public'));
 
+//* Initializing a session by using express-session with some configuration
+app.use(session({
+    secret: 'Our little secret',
+    resave: false,
+    saveUninitialized: true,
+}))
+
+//* Initializing passport
+app.use(passport.initialize());
+//* setting up sessions with passport
+app.use(passport.session());
 
 mongoose
     .connect("mongodb://localhost:27017/userDB", {
-        useNewUrlParser: true
+        useNewUrlParser: true,
+        //* For getting rid from the deprecation warning as we are using 3rd party packages
+        useUnifiedTopology: true,
     })
     .then(() => {
         console.log("connections with data base successful");
@@ -33,18 +46,22 @@ mongoose
     });
 
 
-
 const userSchema = new mongoose.Schema({
-    email: String,
+    username: String,
     password: String
 });
 
-/*
-//*                    ENCRYPTING DATABASE
-*/
+//* Adding Plugins into database Schema i.e. setting up passportLocalMongoose
+userSchema.plugin(passportLocalMongoose);
 
 
 const User = mongoose.model('User', userSchema);
+
+passport.use(User.createStrategy());
+//* Serialize is for creating a login cookies for a specific user
+passport.serializeUser(User.serializeUser());
+//* Deserialize is for destroying a login cookies and finding out the user credentials
+passport.deserializeUser(User.deserializeUser());
 
 
 app.route("/")
@@ -52,7 +69,15 @@ app.route("/")
         res.render('home');
     });
 
-
+app.get("/secrets", (req, res) => {
+    //* isAuthenticated() basically tells that the user is logged in the current session
+    //* means he can enter otherwise login again 
+    if (req.isAuthenticated()) {
+        res.render('secrets');
+    } else {
+        res.redirect('/login');
+    }
+});
 
 app.route("/register")
     .get((req, res) => {
@@ -60,23 +85,22 @@ app.route("/register")
     })
     .post((req, res) => {
 
-        bcrypt.hash(req.body.password, saltRounds, (err, hash) => {
+        //* This register method is present in passport-local-mongoose package 
+        User.register(
+            { username: req.body.username }, req.body.password,
+            (err, user) => {
 
-            const newUser = new User({
-                email: req.body.username,
-                password: hash // just for generating hash
-            });
-
-            // res.send(newUser);
-
-            newUser.save((err) => {
                 if (err) {
                     console.log(err);
+                    res.redirect("/register");
                 } else {
-                    res.render('secrets');
+
+                    passport.authenticate("local")(req, res, () => {
+                        res.redirect("/secrets");
+                    });
                 }
-            });
-        });
+            }
+        );
 
     });
 
@@ -88,35 +112,29 @@ app.route("/login")
     })
     .post((req, res) => {
 
-        User.findOne(
+        const user = new User({
+            username: req.body.username,
+            password: req.body.password
+        });
 
-            {
-                email: req.body.username,
-            },
-            (err, foundUser) => {
-
-                if (err) {
-                    console.log(err);
-                } else {
-                    if (foundUser) {
-                        bcrypt.compare(req.body.password, foundUser.password, (err, result) => {
-
-                            if (result === true) {
-                                res.render('secrets');
-                            }
-
-                        });
-
-                    }
-                }
+        //* This login method is present in passport-local-mongoose package 
+        req.login(user, (err) => {
+            if (err) {
+                console.log(err);
+                res.redirect('/login');
+            } else {
+                passport.authenticate('local')(req, res, () => {
+                    res.redirect('/secrets');
+                });
             }
-        );
+        });
 
     });
 
 
 app.get("/logout", (req, res) => {
-    res.render("home");
+    req.logout();
+    res.redirect("/");
 });
 
 
